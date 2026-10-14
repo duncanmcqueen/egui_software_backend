@@ -20,7 +20,7 @@ fn cached_mesh_reflects_full_and_partial_texture_updates() {
     let mut draw = |delta: Option<ImageDelta>| {
         let mut textures = egui::TexturesDelta::default();
         if let Some(delta) = delta {
-            textures.set.push((id, delta));
+            textures.set.insert(id, vec![delta].into());
         }
         renderer.render(
             &mut BufferMutRef::new(&mut pixels, 8, 8),
@@ -28,6 +28,7 @@ fn cached_mesh_reflects_full_and_partial_texture_updates() {
             &textures,
             1.0,
         );
+        textures.clear();
         pixels.clone()
     };
     let red = Color32::from_rgb(255, 0, 0);

@@ -477,7 +477,8 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                     .extend_from_slice(self.input_events.as_slice());
                 self.input_events.clear();
 
-                let full_output = self.egui_context.run_ui(raw_input, |ui| {
+                self.egui_app.raw_input_hook(&mut raw_input);
+                let mut full_output = self.egui_context.run_ui(raw_input, |ui| {
                     self.egui_app.ui(ui, &mut self.software_backend);
 
                     self.egui_context.viewport(|r| {
@@ -583,6 +584,15 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                                     if self.visible {
                                         self.window
                                             .set_fullscreen(Some(Fullscreen::Borderless(None)))
+                                    }
+                                }
+                                ViewportCommand::SetMonitor(index) => {
+                                    if let Some(monitor) =
+                                        self.window.available_monitors().nth(*index)
+                                    {
+                                        self.window.set_fullscreen(Some(Fullscreen::Borderless(
+                                            Some(monitor),
+                                        )));
                                     }
                                 }
                                 ViewportCommand::Decorations(dec) => {
@@ -718,6 +728,7 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                     &full_output.textures_delta,
                     full_output.pixels_per_point,
                 );
+                full_output.textures_delta.clear();
 
                 buffer
                     .present()
@@ -729,6 +740,10 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
             }
 
             WindowEvent::CloseRequested => {
+                if !self.egui_app.close_requested() {
+                    self.window.request_redraw();
+                    return Ok(());
+                }
                 self.egui_app.on_exit(&self.egui_context);
                 elwt.exit();
             }
@@ -802,6 +817,11 @@ impl SoftwareBackend {
 
 /// Implement this trait to write apps using the optional winit backend similarly to eframe's App.
 pub trait App {
+    fn raw_input_hook(&mut self, _input: &mut egui::RawInput) {}
+    fn close_requested(&mut self) -> bool {
+        true
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, software_backend: &mut SoftwareBackend);
 
     fn on_exit(&mut self, _ctx: &Context) {}
@@ -810,6 +830,14 @@ pub trait App {
 /// Used to initialize the software render backend app, renderer, and winit configuration.
 #[derive(Debug, Clone)]
 pub struct SoftwareBackendAppConfiguration {
+    /// Exit the process after a successful close, before dropping Wayland state.
+    ///
+    /// Haiku's in-process Wayland teardown can race its native window threads.
+    /// This opt-in workaround skips Rust and C++ destructors at process exit.
+    /// Applications must finish saving before accepting a close request.
+    /// Disabled by default; this is intended for process-owning executables only.
+    #[cfg(target_os = "haiku")]
+    pub haiku_exit_process_on_close: bool,
     /// The underlying egui viewport builder that is used to create the window with winit.
     pub viewport_builder: ViewportBuilder,
 
@@ -836,43 +864,12 @@ pub struct SoftwareBackendAppConfiguration {
 
 impl SoftwareBackendAppConfiguration {
     /// Creates a new SoftwareBackendAppConfiguration using the default configuration.
-    pub const fn new() -> Self {
-        //The constructor is not const.
-        let vp = ViewportBuilder {
-            override_redirect: None,
-            title: None,
-            app_id: None,
-            position: None,
-            //CGA
-            inner_size: Some(Vec2::new(320f32, 200f32)),
-            min_inner_size: None,
-            max_inner_size: None,
-            clamp_size_to_monitor_size: None,
-            fullscreen: None,
-            maximized: None,
-            resizable: None,
-            transparent: None,
-            decorations: None,
-            icon: None,
-            active: None,
-            visible: None,
-            fullsize_content_view: None,
-            movable_by_window_background: None,
-            title_shown: None,
-            titlebar_buttons_shown: None,
-            titlebar_shown: None,
-            has_shadow: None,
-            drag_and_drop: None,
-            taskbar: None,
-            close_button: None,
-            minimize_button: None,
-            maximize_button: None,
-            window_level: None,
-            mouse_passthrough: None,
-            window_type: None,
-        };
+    pub fn new() -> Self {
+        let vp = ViewportBuilder::default().with_inner_size([1024.0, 720.0]);
 
         Self {
+            #[cfg(target_os = "haiku")]
+            haiku_exit_process_on_close: false,
             viewport_builder: vp,
 
             allow_raster_opt: true,
@@ -1114,7 +1111,13 @@ pub fn run_app_with_software_backend<T: App>(
         .with_convert_tris_to_rects(settings.convert_tris_to_rects)
         .with_caching(settings.caching);
 
-    let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event()
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    #[cfg(target_os = "haiku")]
+    {
+        use winit::platform::wayland::EventLoopBuilderExtWayland;
+        builder.with_wayland();
+    }
+    let event_loop = builder
         .build()
         .map_err(|e| SoftwareBackendAppError::EventLoop(Box::new(e)))?;
 
@@ -1160,6 +1163,14 @@ pub fn run_app_with_software_backend<T: App>(
 
     if let WinitAppStateMachine::Dead(Some(app_err)) = app {
         return Err(app_err);
+    }
+
+    #[cfg(target_os = "haiku")]
+    if settings.haiku_exit_process_on_close {
+        unsafe extern "C" {
+            fn _exit(status: std::ffi::c_int) -> !;
+        }
+        unsafe { _exit(0) }
     }
 
     Ok(())

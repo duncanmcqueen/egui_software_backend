@@ -6,9 +6,14 @@ use image::ImageBuffer;
 use crate::{BufferMutRef, EguiSoftwareRender};
 
 impl TestRenderer for EguiSoftwareRender {
-    fn handle_delta(&mut self, delta: &TexturesDelta) {
+    fn handle_delta(&mut self, delta: &mut TexturesDelta) {
+        if !delta.set.is_empty() {
+            self.cached_primitives.clear();
+            self.canvas.clear();
+        }
         self.set_textures(delta);
         self.free_textures(delta);
+        delta.clear();
     }
 
     fn render(

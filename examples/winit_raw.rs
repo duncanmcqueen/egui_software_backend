@@ -128,7 +128,7 @@ fn main() {
 
                     let raw_input = app.egui_winit.take_egui_input(window);
 
-                    let full_output = app.egui_ctx.run_ui(raw_input, |ui| {
+                    let mut full_output = app.egui_ctx.run_ui(raw_input, |ui| {
                         egui_demo.ui(ui);
 
                         egui::Window::new("Color Test").show(ui, |ui| {
@@ -162,6 +162,7 @@ fn main() {
                         &full_output.textures_delta,
                         full_output.pixels_per_point,
                     );
+                    full_output.textures_delta.clear();
 
                     buffer.present().unwrap();
 
