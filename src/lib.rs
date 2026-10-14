@@ -260,7 +260,10 @@ impl EguiSoftwareRender {
         assert!(height > 0);
         assert!(pixels_per_point > 0.0);
 
-        self.redraw_everything_this_frame = self.canvas.resize(width, height);
+        // Cached primitives contain rasterized texture pixels. Their geometry hash
+        // does not change when an existing texture is updated.
+        self.redraw_everything_this_frame =
+            self.canvas.resize(width, height) || !textures_delta.set.is_empty();
 
         if self.redraw_everything_this_frame {
             self.canvas.clear();
