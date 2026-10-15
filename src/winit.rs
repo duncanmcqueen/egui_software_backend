@@ -691,11 +691,10 @@ impl<EguiApp: App, EguiAppFactory: FnMut(Context) -> EguiApp>
                                     //UNSUPPORTED
                                 }
                             }
-
-                            if die {
-                                self.window.set_visible(false); //I wish eframe did this.
-                                elwt.exit();
-                            }
+                        }
+                        if die {
+                            self.window.set_visible(false); //I wish eframe did this.
+                            elwt.exit();
                         }
                     });
                 });
